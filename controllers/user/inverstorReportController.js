@@ -76,29 +76,26 @@ function sendEmailForInvestorReminder(to, subject) {
   const body = `
 Dear Founder,
 
-This is a gentle reminder that it's time to submit your **Quarterly Investor Update**.
+This is a friendly reminder to submit your **Quarterly Investor Update**.
 
-Providing regular updates helps build trust and transparency with your investors — and ensures they stay aligned with your progress, challenges, and upcoming goals.
+Regular updates help maintain trust and ensure investors are aligned with your company’s current progress, challenges, and strategic direction.
 
-**What you should include:**
-- Key business metrics (revenue, growth, customer feedback)
-- Product or team updates
-- Market insights or strategic shifts
-- Fundraising progress, if applicable
-- Goals for the upcoming quarter
+Please include:
+- Your current revenue and key business KPIs
+- Notable product improvements or team changes
+- Any major wins, learnings, or setbacks this quarter
+- A brief summary of what’s coming next or where support is needed
 
-To maintain consistency, our system expects one update every 3 months.
+Consistent updates (every 3 months) help everyone stay in sync and are part of our shared commitment to transparency.
 
-Please log in to your dashboard and complete the update at your earliest convenience.
-
-If you’ve already submitted your update recently, you may disregard this message.
+If you’ve already submitted your update, you can disregard this message.
 
 Best regards,  
 Investor Relations Team  
 `;
 
   const mailOptions = {
-    from: "scale@blueprintcatalyst.com",
+    from: '"BluePrint Catalyst" <scale@blueprintcatalyst.com>',
     to,
     subject,
     text: body,
@@ -230,10 +227,10 @@ exports.SendreportToinvestor = async (req, res) => {
         );
 
         // 📧 Send Email
-        const url = `http://localhost:3000/investor/information/${token}`;
+        const url = `https://blueprintcatalyst.com/investor/information/${token}`;
 
         const mailOptions = {
-          from: "scale@blueprintcatalyst.com",
+          from: '"BluePrint Catalyst" <scale@blueprintcatalyst.com>',
           to: email,
           subject: `New Report from ${entrepreneurName}`,
           html: `

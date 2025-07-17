@@ -34,8 +34,8 @@ require("dotenv").config();
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "avinayquicktech@gmail.com",
-    pass: "mxfc qydm drdu rgjc",
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 //Email Detail
@@ -51,10 +51,11 @@ exports.uploadDocuments = async (req, res) => {
     const extractedTexts = [];
     const [lockedDocs] = await db.promise().query(
       `SELECT id FROM dataroomdocuments 
-   WHERE subcategory_id = ? AND user_id = ? AND locked = 'Yes'`,
+       WHERE subcategory_id = ? AND user_id = ? AND locked = 'Yes'`,
       [datasave.subcatgeoryId, datasave.user_id]
     );
     const isLocked = lockedDocs.length > 0;
+
     for (const file of files) {
       const ext = path.extname(file.originalname).toLowerCase();
       let text = "";
@@ -95,38 +96,48 @@ exports.uploadDocuments = async (req, res) => {
           text: null,
           error: "Error extracting text",
         });
-        continue;
       }
     }
 
-    // Save to DB (without AI summary/questions)
+    // Check for any extraction failure
+    const failedExtractions = extractedTexts.filter(
+      (file) => file.text === null && file.error
+    );
+
+    if (failedExtractions.length > 0) {
+      return res.status(200).json({
+        message: "Some files failed to extract text",
+        failedFiles: failedExtractions,
+        status: "2",
+      });
+    }
+
+    // Save extracted documents to DB
     const insertedDocuments = [];
 
     for (const fileObj of extractedTexts) {
-      if (!fileObj.text || fileObj.error) continue;
-
       const uploadedAt = new Date();
 
       try {
         const [result] = await db.promise().query(
           `INSERT INTO dataroomdocuments 
-       (user_id, category_id, subcategory_id, folder_name, doc_name, summary_txt, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (user_id, category_id, subcategory_id, folder_name, doc_name, summary_txt, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             datasave.user_id,
             datasave.catgeoryId || 0,
             datasave.subcatgeoryId || 0,
             datasave.filetype,
             fileObj.fileSavedAs,
-            null, // summary will be added later
+            null, // summary to be filled later
             uploadedAt,
           ]
         );
 
         insertedDocuments.push({
-          doc_id: result.insertId, // captured insert ID
+          doc_id: result.insertId,
           filename: fileObj.filename,
-          locked: false, // initial state (you can update later based on user lock choice)
+          locked: false,
           filetype: datasave.filetype,
         });
       } catch (dbError) {
@@ -135,6 +146,7 @@ exports.uploadDocuments = async (req, res) => {
     }
 
     return res.json({
+      status: "1",
       message: "Files uploaded and saved successfully",
       extractedTexts,
       insertedDocuments,
@@ -145,14 +157,54 @@ exports.uploadDocuments = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
 exports.uploadDocumentsEdit = async (req, res) => {
   const datasave = req.body;
 
   try {
-    const file = req.file; // use req.file instead of req.files
+    const file = req.file;
 
     if (!file) {
       return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const ext = path.extname(file.originalname).toLowerCase();
+    let text = "";
+    let error = null;
+
+    try {
+      if (ext === ".pdf") {
+        const buffer = fs.readFileSync(file.path);
+        const data = await pdfParse(buffer);
+        text = data.text;
+      } else if (ext === ".docx") {
+        const result = await mammoth.extractRawText({ path: file.path });
+        text = result.value;
+      } else if (ext === ".xlsx") {
+        const workbook = xlsx.readFile(file.path);
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        text = xlsx.utils.sheet_to_csv(sheet);
+      } else if (ext === ".txt") {
+        text = fs.readFileSync(file.path, "utf-8");
+      } else {
+        error = "Unsupported file type";
+      }
+    } catch (extractionErr) {
+      console.error("Text extraction error:", extractionErr);
+      error = "Error extracting text";
+    }
+
+    if (error || !text) {
+      return res.status(200).json({
+        status: "2",
+        message: "Failed to extract file content",
+        failedFiles: [
+          {
+            filename: file.originalname,
+            error: error || "Unknown error",
+          },
+        ],
+      });
     }
 
     if (datasave.documentId) {
@@ -160,13 +212,19 @@ exports.uploadDocumentsEdit = async (req, res) => {
         `UPDATE dataroomdocuments
          SET doc_name = ?
          WHERE id = ?`,
-        [file.savedAs, datasave.documentId] // use file.savedAs set in route
+        [file.savedAs, datasave.documentId]
       );
     }
 
-    res.status(200).json({ message: "Document updated successfully" });
+    res.status(200).json({
+      status: "1",
+      message: "Document updated and extracted successfully",
+      filename: file.originalname,
+      fileSavedAs: file.savedAs,
+      extractedText: text,
+    });
   } catch (error) {
-    console.error("Error uploading documents:", error);
+    console.error("Error in uploadDocumentsEdit:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -354,34 +412,6 @@ exports.getcategoryname = (req, res) => {
   });
 };
 //sendmailcheck();
-function sendmailcheck() {
-  const transporter = nodemailer.createTransport({
-    host: "mail.blueprintcatalyst.com",
-    port: 587,
-    secure: false, // STARTTLS
-    auth: {
-      user: "angels@blueprintcatalyst.com",
-      pass: "m.@biCC^oY3*2hx1",
-    },
-    tls: {
-      rejectUnauthorized: false, // if you get SSL certificate errors
-    },
-  });
-
-  const mailOptions = {
-    from: '"BluePrint Catalyst" <scale@blueprintcatalyst.com>',
-    to: "avinayquicktech@gmail.com",
-    subject: "Test email",
-    text: "This is a test email",
-  };
-
-  transporter.sendMail(mailOptions, (error, info) => {
-    if (error) {
-      return console.error("Error sending email:", error);
-    }
-    console.log("Email sent:", info);
-  });
-}
 
 exports.UserDocDeleteFile = (req, res) => {
   const user_id = req.body.user_id;
@@ -612,7 +642,7 @@ exports.generateDocFile = async (req, res) => {
             db.query(
               `SELECT * 
              FROM investor_updates 
-             WHERE user_id = ? AND type = 'Dataroom' order by id desc`,
+             WHERE user_id = ? AND type = 'Due Diligence Document' order by id desc`,
               [responses.user_id],
               async (err, versionResult) => {
                 if (err) {
@@ -634,12 +664,13 @@ exports.generateDocFile = async (req, res) => {
                         message: "Management Summary fetch failed",
                         error: err,
                       });
-                    // await analyzePublicPeers(
-                    //   responses.user_id,
-                    //   responses.code,
-                    //   "Apple",
-                    //   version
-                    // );
+                    var corp = fileSummaryResults[0].company_name;
+                    await analyzePublicPeers(
+                      responses.user_id,
+                      responses.code,
+                      corp,
+                      version
+                    );
                     var executiveSummary = fileSummaryResults[0].summary || "";
                     let companyLogoPath = null;
                     if (fileSummaryResults[0].company_logo !== null) {
@@ -652,7 +683,7 @@ exports.generateDocFile = async (req, res) => {
                         //}
                       }
                     }
-                    console.log(companyLogoPath);
+
                     let managementSummary = "",
                       productOr_Summary = "",
                       salesmarketing = "",
@@ -937,17 +968,46 @@ exports.generateDocFile = async (req, res) => {
                                 // Save to DB
                                 db.query(
                                   `INSERT INTO investor_updates (
-                                  user_id,type, version, update_date, document_name, is_locked, created_at, updated_at
-                                ) VALUES (?,'Dataroom', ?, NOW(), ?, 1, NOW(), NOW())`,
-                                  [responses.user_id, version, fileName],
-                                  (insertErr) => {
-                                    if (insertErr)
+    user_id, type, version, update_date, document_name,
+    is_locked, created_at, updated_at
+  ) VALUES (?, ?, ?, NOW(), ?, ?, NOW(), NOW())`,
+                                  [
+                                    1,
+                                    "Due Diligence Document",
+                                    version,
+                                    fileName,
+                                    1,
+                                  ],
+                                  (insertErr, result) => {
+                                    if (insertErr) {
                                       console.error(
-                                        "Document log insert failed",
+                                        "Static insert failed:",
+                                        insertErr.sqlMessage ||
+                                          insertErr.message,
                                         insertErr
                                       );
+                                    } else {
+                                      console.log(
+                                        "Static insert success:",
+                                        result
+                                      );
+                                    }
                                   }
                                 );
+
+                                // db.query(
+                                //   `INSERT INTO investor_updates (
+                                //   user_id,type, version, update_date, document_name, is_locked, created_at, updated_at
+                                // ) VALUES (?,'Dataroom', ?, NOW(), ?, 1, NOW(), NOW())`,
+                                //   [responses.user_id, version, fileName],
+                                //   (insertErr) => {
+                                //     if (insertErr)
+                                //       console.error(
+                                //         "Document log insert failed",
+                                //         insertErr
+                                //       );
+                                //   }
+                                // );
                                 // db.query(
                                 //   "UPDATE dataroomdocuments SET docs_generate = ? WHERE user_id=?",
                                 //   ["Yes", responses.user_id],
@@ -1210,7 +1270,6 @@ exports.generateProcessAI = async (req, res) => {
   const { user_id, payid } = req.body;
   const uniqcode = generateUniqueCode();
   const createdAt = new Date();
-  return;
   try {
     const [docs] = await db
       .promise()
@@ -1485,7 +1544,7 @@ exports.generateProcessAI = async (req, res) => {
   }
 };
 async function sendApprovalEmail({ email, companyName, uniqcode }) {
-  const approvalLink = `http://localhost:3000/approvalpage/${uniqcode}`;
+  const approvalLink = `https://blueprintcatalyst.com/approvalpage/${uniqcode}`;
 
   const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -1557,7 +1616,7 @@ exports.perInstancePayment = async (req, res) => {
   try {
     // Step 1: Get total summaries
     db.query(
-      "SELECT COUNT(*) AS summaryCount FROM dataroomai_summary WHERE user_id = ? AND usersubscriptiondataroomone_time_id = ?",
+      "SELECT COUNT(*) AS summaryCount FROM dataroomai_executive_summary WHERE user_id = ? AND usersubscriptiondataroomone_time_id = ?",
       [user_id, payid],
       (err, summaryResults) => {
         if (err) {

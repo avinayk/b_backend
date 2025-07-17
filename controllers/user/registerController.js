@@ -683,8 +683,10 @@ exports.selectModule = (req, res) => {
                 topic: meeting.topic,
                 title: `${localTime.format("hh:mm A")}`,
                 start: localTime.toDate(),
+                time: meeting.time,
                 end: localTime.clone().add(30, "minutes").toDate(),
                 allDay: false,
+                zoom_link: meeting.zoom_link,
                 datee: meeting.meeting_date_time,
                 moduleId: meeting.module_id,
                 originalMeeting: meeting,
@@ -1344,7 +1346,7 @@ Startup Portal Team
 }
 
 exports.register_zoom = (req, res) => {
-  const { ip, user_id, email, name, selectedMeetings } = req.body;
+  const { ip, user_id, email, name, selectedMeetings, timezone } = req.body;
 
   // ✅ Validate required fields
   if (!email || !name || !selectedMeetings || selectedMeetings.length === 0) {
@@ -1425,15 +1427,15 @@ exports.register_zoom = (req, res) => {
       // ✅ Step 3: Insert individual registrations
       const insertQuery = `
         INSERT INTO zoommeeting_register 
-        (user_id, name, email, ip_address, registered_meeting_ids, created_at) 
-        VALUES (?, ?, ?, ?, ?, NOW())
+        (timezone,user_id, name, email, ip_address, registered_meeting_ids, created_at) 
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
       `;
 
       const insertTasks = selectedMeetings.map((meetingId) => {
         return new Promise((resolve, reject) => {
           db.query(
             insertQuery,
-            [user_id, name, email, ip, JSON.stringify([meetingId])],
+            [timezone, user_id, name, email, ip, JSON.stringify([meetingId])],
             (err3) => {
               if (err3) return reject(err3);
               resolve(meetingId);
@@ -1517,6 +1519,7 @@ exports.register_zoom = (req, res) => {
                   start: localTime.toDate(), // ✅ Correct local date-time object
                   end: localTime.clone().add(30, "minutes").toDate(),
                   time: meeting.time,
+                  zoom_link: meeting.zoom_link,
                   module_id: meeting.module_id,
                   zoomLink: meeting.zoom_link,
                 };
@@ -1640,7 +1643,7 @@ exports.get_all_zoom_meetings = (req, res) => {
 exports.get_combined_zoom_meetings = (req, res) => {
   const module_id = req.body.module_id;
   const user_id = req.body.user_id;
-  const selectedZone = req.body.selectedZone || "Asia/Kolkata"; // optional
+  const selectedZone = req.body.selectedZone; // optional
 
   // Step 1: Fetch ALL meetings
   const allMeetingsQuery = "SELECT * FROM zoommeeting WHERE module_id = ?";
@@ -1726,12 +1729,14 @@ exports.get_combined_zoom_meetings = (req, res) => {
             id: meeting.id,
             topic: meeting.topic,
             title: `${localTime.format("hh:mm A")} ${meeting.topic}`,
+            time: meeting.time,
             start: localTime.toDate(),
             end: localTime.clone().add(30, "minutes").toDate(),
             allDay: false,
             datee: meeting.meeting_date_time,
             moduleId: meeting.module_id,
             originalMeeting: meeting,
+            zoom_link: meeting.zoom_link,
             isRegistered: registeredIDs.includes(meeting.id),
           };
         })
@@ -1955,6 +1960,68 @@ exports.getusersSubscriptionPlan = async (req, res) => {
           );
         }
       );
+    }
+  );
+};
+
+exports.openZoomLink = (req, res) => {
+  const id = req.body.id;
+
+  const clientIp = req.body.ip_address;
+
+  // Verify JWT token
+  db.query(
+    `SELECT 
+  zm.ip_address, 
+  zm.zoom_link,  
+  zm.token_expiry, 
+  zmr.email 
+FROM zoommeeting AS zm 
+JOIN zoommeeting_register AS zmr 
+  ON FIND_IN_SET(
+       zm.id,
+       REPLACE(REPLACE(REPLACE(zmr.registered_meeting_ids, '[', ''), ']', ''), ' ', '')
+     ) > 0
+WHERE zm.id = ?;
+`,
+    [id],
+    (err, results) => {
+      if (err) {
+        console.error("Database query error:", err);
+        return res
+          .status(500)
+          .json({ message: "Database query error", error: err });
+      }
+
+      if (results.length === 0) {
+        return res.status(200).json({
+          message: "Invalid or expired token",
+          error: "No matching record found",
+          status: "2",
+        });
+      }
+
+      const { ip_address, zoom_link, zoom_meeting_id, token_expiry } =
+        results[0];
+
+      // Check token expiry
+
+      // Check IP match
+      if (ip_address !== clientIp) {
+        return res.status(200).json({
+          message: "Access denied: IP address does not match",
+          error: "IP mismatch",
+          status: "2",
+        });
+      }
+
+      // Check meeting ID
+
+      res.status(200).send(`
+
+                <iframe src="${zoom_link}" allow="camera; microphone; fullscreen" sandbox="allow-same-origin allow-scripts allow-popups" onload="window.parent.postMessage('zoom-loaded', '*')"></iframe>
+
+            `);
     }
   );
 };
