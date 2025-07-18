@@ -250,7 +250,8 @@ exports.CreateuserSubscriptionDataRoomCheck = async (req, res) => {
   }
 };
 exports.CreateuserSubscriptionDataRoom = async (req, res) => {
-  const { code, amount, user_id, clientSecret, payment_status } = req.body;
+  const { discount, code, amount, user_id, clientSecret, payment_status } =
+    req.body;
   var dd = req.body;
   try {
     const userInsertQuery = `
@@ -304,9 +305,14 @@ exports.CreateuserSubscriptionDataRoom = async (req, res) => {
                 }
                 db.query(
                   `INSERT INTO used_referral_code 
-                                 (user_id, discount_code_id, payment_type, created_at) 
-                                 VALUES (?, ?, ?, NOW())`,
-                  [user_id, referData.id, "Academy"],
+                                 (discounts,user_id, discount_code_id, payment_type, created_at) 
+                                 VALUES (?, ?, ?, ?, NOW())`,
+                  [
+                    discount,
+                    user_id,
+                    referData.id,
+                    "Dataroom_Plus_Investor_Report",
+                  ],
                   (insertErr) => {
                     if (insertErr)
                       console.error("Document log insert failed", insertErr);
@@ -1842,35 +1848,38 @@ exports.Addinvenstorreport = async (req, res) => {
     }
 
     // 1. Get latest version
-    const versionQuery = `SELECT MAX(version) AS max_version FROM investor_updates WHERE user_id = ?`;
-    db.query(versionQuery, [user_id], async (err, versionResults) => {
-      if (err) {
-        return res.status(500).json({
-          success: false,
-          message: "Version fetch failed.",
-        });
-      }
+    const versionQuery = `SELECT MAX(version) AS max_version FROM investor_updates WHERE user_id = ? And type =?`;
+    db.query(
+      versionQuery,
+      [user_id, "Investor updates"],
+      async (err, versionResults) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Version fetch failed.",
+          });
+        }
 
-      const latestVersion = Number(versionResults[0]?.max_version || 0);
-      const newVersion = latestVersion + 1;
+        const latestVersion = Number(versionResults[0]?.max_version || 0);
+        const newVersion = latestVersion + 1;
 
-      let previousData = null;
-      if (latestVersion > 0) {
-        const prevQuery = `
+        let previousData = null;
+        if (latestVersion > 0) {
+          const prevQuery = `
           SELECT financial_performance, operational_updates, market_competitive,
                  customer_product, fundraising_financial, future_outlook
           FROM investor_updates
-          WHERE user_id = ? AND version = ?
+          WHERE user_id = ? AND version = ? And type = ?
         `;
-        const [prevResults] = await db
-          .promise()
-          .query(prevQuery, [user_id, latestVersion]);
-        previousData = prevResults[0] || null;
-      }
+          const [prevResults] = await db
+            .promise()
+            .query(prevQuery, [user_id, latestVersion, "Investor updates"]);
+          previousData = prevResults[0] || null;
+        }
 
-      // 2. Prepare prompt for OpenAI
-      const comparisonPrompt = previousData
-        ? `
+        // 2. Prepare prompt for OpenAI
+        const comparisonPrompt = previousData
+          ? `
 You are an AI assistant helping write investor updates. Compare the previous update with the latest update and summarize the differences clearly.
 
 Previous Update:
@@ -1891,7 +1900,7 @@ Current Update:
 
 Write a detailed executive summary (~200 words) showing progress or changes.
 `
-        : `
+          : `
 You are an AI assistant helping prepare a professional investor update. Summarize the following information into an executive summary (~200 words).
 
 Financial Performance: ${financialPerformance}
@@ -1902,41 +1911,42 @@ Fundraising & Financial Strategy: ${fundraisingFinancial}
 Future Outlook & Strategy: ${futureOutlook}
 `;
 
-      const chatResponse = await openai.chat.completions.create({
-        model: "gpt-4-turbo",
-        messages: [{ role: "user", content: comparisonPrompt }],
-        temperature: 0.7,
-      });
+        const chatResponse = await openai.chat.completions.create({
+          model: "gpt-4-turbo",
+          messages: [{ role: "user", content: comparisonPrompt }],
+          temperature: 0.7,
+        });
 
-      const executive_summary = chatResponse.choices[0].message.content.trim();
+        const executive_summary =
+          chatResponse.choices[0].message.content.trim();
 
-      // 3. Get company name
-      const [companyResult] = await db
-        .promise()
-        .query("SELECT company_name FROM company WHERE id = ? LIMIT 1", [
-          user_id,
-        ]);
-      const companyName =
-        companyResult[0]?.company_name?.replace(/\s+/g, "_") || "company";
+        // 3. Get company name
+        const [companyResult] = await db
+          .promise()
+          .query("SELECT company_name FROM company WHERE id = ? LIMIT 1", [
+            user_id,
+          ]);
+        const companyName =
+          companyResult[0]?.company_name?.replace(/\s+/g, "_") || "company";
 
-      const formattedDate = formatCustomDate(new Date());
-      const pdfFileName = `${companyName}_investor_update_v${newVersion}_${formattedDate}.pdf`;
+        const formattedDate = formatCustomDate(new Date());
+        const pdfFileName = `${companyName}_investor_update_v${newVersion}_${formattedDate}.pdf`;
 
-      // 4. Generate PDF with Puppeteer
-      const folderPath = path.join(
-        __dirname,
-        "..",
-        "..",
-        "upload",
-        "docs",
-        `doc_${user_id}`,
-        "investor_report"
-      );
-      fs.mkdirSync(folderPath, { recursive: true });
+        // 4. Generate PDF with Puppeteer
+        const folderPath = path.join(
+          __dirname,
+          "..",
+          "..",
+          "upload",
+          "docs",
+          `doc_${user_id}`,
+          "investor_report"
+        );
+        fs.mkdirSync(folderPath, { recursive: true });
 
-      const pdfFilePath = path.join(folderPath, pdfFileName);
+        const pdfFilePath = path.join(folderPath, pdfFileName);
 
-      const htmlContent = `
+        const htmlContent = `
         <html>
           <head>
             <style>
@@ -1955,56 +1965,58 @@ Future Outlook & Strategy: ${futureOutlook}
         </html>
       `;
 
-      const browser = await puppeteer.launch({ headless: true });
-      const page = await browser.newPage();
-      await page.setContent(htmlContent, { waitUntil: "networkidle0" });
-      await page.pdf({ path: pdfFilePath, format: "A4" });
-      await browser.close();
+        const browser = await puppeteer.launch({ headless: true });
+        const page = await browser.newPage();
+        await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+        await page.pdf({ path: pdfFilePath, format: "A4" });
+        await browser.close();
 
-      // 5. Insert into DB
-      const insertQuery = `
+        // 5. Insert into DB
+        const insertQuery = `
         INSERT INTO investor_updates (
-          user_id, version, update_date,
+          type,user_id, version, update_date,
           financial_performance, operational_updates, market_competitive,
           customer_product, fundraising_financial, future_outlook,
           executive_summary, document_name, is_locked, created_at, updated_at
-        ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        ) VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
       `;
 
-      const safe = (v) =>
-        v === undefined || v === null || v === "" ? null : v;
+        const safe = (v) =>
+          v === undefined || v === null || v === "" ? null : v;
 
-      const values = [
-        safe(user_id),
-        newVersion,
-        safe(financialPerformance),
-        safe(operationalUpdates),
-        safe(marketCompetitive),
-        safe(customerProduct),
-        safe(fundraisingFinancial),
-        safe(futureOutlook),
-        safe(executive_summary),
-        pdfFileName,
-        0,
-      ];
+        const values = [
+          "Investor updates",
+          safe(user_id),
+          newVersion,
+          safe(financialPerformance),
+          safe(operationalUpdates),
+          safe(marketCompetitive),
+          safe(customerProduct),
+          safe(fundraisingFinancial),
+          safe(futureOutlook),
+          safe(executive_summary),
+          pdfFileName,
+          0,
+        ];
 
-      db.query(insertQuery, values, (err, result) => {
-        if (err) {
-          return res.status(500).json({
-            success: false,
-            message: "Insert failed.",
-            error: err.message,
+        db.query(insertQuery, values, (err, result) => {
+          if (err) {
+            return res.status(500).json({
+              success: false,
+              message: "Insert failed.",
+              error: err.message,
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: `Investor report version ${newVersion} created and saved as PDF.`,
+            document_name: pdfFileName,
+            executive_summary,
           });
-        }
-
-        return res.status(200).json({
-          success: true,
-          message: `Investor report version ${newVersion} created and saved as PDF.`,
-          document_name: pdfFileName,
-          executive_summary,
         });
-      });
-    });
+      }
+    );
   } catch (error) {
     console.error("Error:", error);
     return res.status(500).json({
@@ -2136,7 +2148,7 @@ exports.checkSubscriptionInvestorReport = async (req, res) => {
 };
 
 exports.CreateuserSubscriptionInvestorReporting = async (req, res) => {
-  const { amount, user_id, clientSecret } = req.body;
+  const { discount, amount, code, user_id, clientSecret } = req.body;
 
   try {
     const userInsertQuery = `
@@ -2159,7 +2171,46 @@ exports.CreateuserSubscriptionInvestorReporting = async (req, res) => {
           console.error("DB Insert Error:", err);
           return res.status(500).json({ error: "Database error" });
         }
+        if (code !== "") {
+          const query = "SELECT * FROM  discount_code where code = ?";
 
+          db.query(query, [code], (err, row) => {
+            if (err) {
+              return res.status(500).json({
+                message: "Database query error",
+                error: err,
+              });
+            }
+            var usecount = row[0].used_count + 1;
+            var referData = row[0];
+            db.query(
+              "UPDATE discount_code SET used_count = ? WHERE code=?",
+              [usecount, code],
+              (finalErr) => {
+                if (finalErr) {
+                  return res
+                    .status(500)
+                    .json({ message: "Update failed", error: finalErr });
+                }
+                db.query(
+                  `INSERT INTO used_referral_code 
+                                 (discounts,user_id, discount_code_id, payment_type, created_at) 
+                                 VALUES (?, ?, ?, ?, NOW())`,
+                  [
+                    discount,
+                    user_id,
+                    referData.id,
+                    "Dataroom_Plus_Investor_Report",
+                  ],
+                  (insertErr) => {
+                    if (insertErr)
+                      console.error("Document log insert failed", insertErr);
+                  }
+                );
+              }
+            );
+          });
+        }
         res.status(200).json({
           message: "",
           status: 1,
@@ -2251,8 +2302,8 @@ exports.checkreferCode = async (req, res) => {
   const responses = req.body;
   try {
     db.query(
-      "SELECT * from discount_code where code = ? And exp_date >= CURRENT_DATE",
-      [responses.code],
+      "SELECT * from discount_code where code = ? And exp_date >= CURRENT_DATE And type=?",
+      [responses.code, responses.type],
       (err, row) => {
         if (err) {
           return res
@@ -2289,7 +2340,8 @@ exports.CreateuserSubscription_AcademyCheck = async (req, res) => {
   }
 };
 exports.CreateuserSubscription_Academy = async (req, res) => {
-  const { code, amount, user_id, clientSecret, payment_status } = req.body;
+  const { code, discount, amount, user_id, clientSecret, payment_status } =
+    req.body;
   var dd = req.body;
   try {
     const userInsertQuery = `
@@ -2335,9 +2387,9 @@ exports.CreateuserSubscription_Academy = async (req, res) => {
                 }
                 db.query(
                   `INSERT INTO used_referral_code 
-                                 (user_id, discount_code_id, payment_type, created_at) 
-                                 VALUES (?, ?, ?, NOW())`,
-                  [user_id, referData.id, "Academy"],
+                                 (discounts,user_id, discount_code_id, payment_type, created_at) 
+                                 VALUES (?, ?, ?, ?, NOW())`,
+                  [discount, user_id, referData.id, "Academy"],
                   (insertErr) => {
                     if (insertErr)
                       console.error("Document log insert failed", insertErr);

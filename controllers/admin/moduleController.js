@@ -730,10 +730,10 @@ exports.discountAddEdit = (req, res) => {
   var date = new Date();
   if (data.id) {
     const query =
-      "UPDATE discount_code SET usage_limit=?,percentage=?,exp_date=? WHERE id = ?";
+      "UPDATE discount_code SET type=?,usage_limit=?,percentage=?,exp_date=? WHERE id = ?";
     db.query(
       query,
-      [data.usage_limit, data.percentage, expdate, data.id],
+      [data.type, data.usage_limit, data.percentage, expdate, data.id],
       (err, result) => {
         if (err) {
           console.error("Error inserting data into database:", err.stack);
@@ -750,10 +750,10 @@ exports.discountAddEdit = (req, res) => {
     );
   } else {
     const query =
-      "INSERT INTO discount_code (usage_limit,code,percentage,exp_date,created_at) VALUES ( ?, ?, ?, ?,?)";
+      "INSERT INTO discount_code (type,usage_limit,code,percentage,exp_date,created_at) VALUES (?, ?, ?, ?, ?,?)";
     db.query(
       query,
-      [data.usage_limit, data.code, data.percentage, expdate, date],
+      [data.type, data.usage_limit, data.code, data.percentage, expdate, date],
       (err, result) => {
         if (err) {
           console.error("Error inserting data into database:", err.stack);
@@ -1260,6 +1260,36 @@ exports.getallUsersJoinedMeet = (req, res) => {
     return res.status(200).json({
       message: "User meeting join list fetched successfully",
       results: formattedResults,
+    });
+  });
+};
+
+exports.getUseddiscountCode = (req, res) => {
+  var code = req.body.code;
+  const query = `
+    SELECT 
+    discount_code.*,
+    used_referral_code.discounts AS used_discounts,
+    used_referral_code.user_id,
+    company.company_name,
+    company.email
+FROM discount_code
+LEFT JOIN used_referral_code 
+    ON used_referral_code.discount_code_id = discount_code.id
+LEFT JOIN company 
+    ON company.id = used_referral_code.user_id
+WHERE discount_code.code = ?;
+;
+`;
+  db.query(query, [code], (error, results) => {
+    if (error) {
+      console.error("Error fetching payment data:", error);
+      return res.status(500).json({ message: "Error fetching data." });
+    }
+
+    res.status(200).json({
+      message: "Successfully fetched data",
+      results: results,
     });
   });
 };

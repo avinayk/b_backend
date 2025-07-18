@@ -50,4 +50,5 @@ router.post("/getemailtemplate", moduleController.getemailtemplate);
 router.post("/emailtemplateDelete", moduleController.emailtemplateDelete);
 router.post("/getemailtemplateSingle", moduleController.getemailtemplateSingle);
 router.post("/getallUsersJoinedMeet", moduleController.getallUsersJoinedMeet);
+router.post("/getUseddiscountCode", moduleController.getUseddiscountCode);
 module.exports = router;

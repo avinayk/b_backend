@@ -1726,7 +1726,6 @@ exports.get_combined_zoom_meetings = (req, res) => {
           const localTime = meetingTimeInOriginal.clone().tz(userTimeZone);
 
           return {
-            usertimezone: userTimeZone,
             id: meeting.id,
             topic: meeting.topic,
             title: `${localTime.format("hh:mm A")} ${meeting.topic}`,
@@ -1945,34 +1944,18 @@ exports.getusersSubscriptionPlan = async (req, res) => {
               if (err)
                 return res.status(500).json({ message: "Error 3", error: err });
 
-              db.query(
-                `SELECT * FROM usersubscriptiondata_academy WHERE user_id = ?`,
-                [user_id],
-                (err, academySub) => {
-                  if (err)
-                    return res
-                      .status(500)
-                      .json({ message: "Error 4", error: err });
+              const result = {
+                dataroomOneTime: dataroomOneTime.length
+                  ? dataroomOneTime[0]
+                  : null,
+                perInstancePurchases: perInstance,
+                investorReporting: reportingSub.length ? reportingSub[0] : null,
+              };
 
-                  const result = {
-                    dataroomOneTime: dataroomOneTime.length
-                      ? dataroomOneTime[0]
-                      : null,
-                    perInstancePurchases: perInstance,
-                    investorReporting: reportingSub.length
-                      ? reportingSub[0]
-                      : null,
-                    academySubscription: academySub.length
-                      ? academySub[0]
-                      : null,
-                  };
-
-                  res.status(200).json({
-                    success: true,
-                    results: result,
-                  });
-                }
-              );
+              res.status(200).json({
+                success: true,
+                results: result,
+              });
             }
           );
         }

@@ -237,31 +237,33 @@ exports.getSharereportGrouped = (req, res) => {
 
   const query = `
     SELECT
-      sharereport.*,
-      CASE
-        WHEN COUNT(sharereport.id) > 0 THEN 'Yes'
-        ELSE 'No'
-      END AS is_shareded,
-      investor_updates.*,
-      investor_updates.user_id as userid,
-      investor_updates.created_at as dateofreport,
-      investor_information.*,
-      investor_information.unique_code as uniquecode,
-      investor_information.created_at as dateview,
-      company.company_name as companyname
-    FROM
-        investor_updates
-    LEFT JOIN
-      sharereport
-      ON investor_updates.id = sharereport.investor_updates_id
-    LEFT JOIN
-      investor_information
-      ON investor_information.unique_code = sharereport.unique_code
-    LEFT JOIN
-      company
-      ON company.id = investor_updates.user_id
-    WHERE
-      investor_updates.id = ?;
+  MAX(sharereport.id) AS sharereport_id,
+  CASE
+    WHEN COUNT(sharereport.id) > 0 THEN 'Yes'
+    ELSE 'No'
+  END AS is_shareded,
+  investor_updates.*,
+  investor_updates.user_id AS userid,
+  investor_updates.created_at AS dateofreport,
+  MAX(investor_information.id) AS investor_info_id,
+  MAX(investor_information.unique_code) AS uniquecode,
+  MAX(investor_information.created_at) AS dateview,
+  MAX(investor_information.first_name) AS first_name,
+  MAX(investor_information.last_name) AS last_name,
+  MAX(investor_information.email) AS email,
+  MAX(investor_information.phone) AS mobile,
+  MAX(investor_information.city) AS city,
+  MAX(investor_information.country) AS country,
+  MAX(investor_information.ip_address) AS ip_address,
+  MAX(company.company_name) AS companyname
+FROM investor_updates
+LEFT JOIN sharereport ON investor_updates.id = sharereport.investor_updates_id
+LEFT JOIN investor_information ON investor_information.unique_code = sharereport.unique_code
+LEFT JOIN company ON company.id = investor_updates.user_id
+WHERE investor_updates.id = ?
+GROUP BY investor_updates.id
+LIMIT 0, 25;
+;
   `;
 
   db.query(query, [id], (err, results) => {
@@ -309,12 +311,12 @@ exports.getSharereportGrouped = (req, res) => {
             email: row.email,
             unique_code: row.uniquecode,
             sent_date: row.sent_date,
-            mobile: row.phone,
+            mobile: row.mobile,
             country: row.country,
             cityy: row.city,
             expired_at: row.expired_at,
             report_type: row.report_type,
-            date_view: row.dateview,
+            dateview: row.dateview,
             ip_address: row.ip_address,
           })),
       };
